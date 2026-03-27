@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import axios from "axios";
 import http from "http";
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -8,7 +7,6 @@ const app = express();
 app.use(cors());
 
 const APP_ID = process.env.APP_ID;
-const SECRET_KEY = process.env.SECRET_KEY;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 
 let ACCESS_TOKEN = "";
@@ -19,24 +17,24 @@ app.get("/login", (req, res) => {
   res.redirect(url);
 });
 
-/* ===== CALLBACK ===== */
-app.get("/callback", async (req, res) => {
+/* ===== CALLBACK (IMPORTANT FIX) ===== */
+app.get("/callback", (req, res) => {
   const auth_code = req.query.auth_code;
 
   if (!auth_code) {
     return res.send("❌ No auth code received");
   }
 
-  // IMPORTANT: This is the correct token format
+  // ✅ THIS IS THE KEY FIX
   ACCESS_TOKEN = `${APP_ID}:${auth_code}`;
 
-  res.send("✅ Login successful (token captured). Now open /start");
+  console.log("Token set:", ACCESS_TOKEN);
+
+  res.send("✅ Login successful. Now open /start");
 });
 
-/* ===== CREATE SERVER ===== */
+/* ===== SERVER ===== */
 const server = http.createServer(app);
-
-/* ===== WEBSOCKET ===== */
 const wss = new WebSocketServer({ server });
 
 function connectFyers() {
@@ -68,31 +66,33 @@ function connectFyers() {
   });
 
   ws.on("close", () => {
-    console.log("Reconnecting to Fyers...");
+    console.log("Reconnecting...");
     setTimeout(connectFyers, 3000);
   });
 
   ws.on("error", (err) => {
-    console.error("Fyers WS Error:", err.message);
+    console.log("WS Error:", err.message);
   });
 }
 
-/* ===== START STREAM ===== */
+/* ===== START ===== */
 app.get("/start", (req, res) => {
-  if (!ACCESS_TOKEN) return res.send("❌ Login first");
+  if (!ACCESS_TOKEN) {
+    return res.send("❌ Login first");
+  }
 
   connectFyers();
   res.send("🚀 Live streaming started");
 });
 
-/* ===== HEALTH CHECK ===== */
+/* ===== HOME ===== */
 app.get("/", (req, res) => {
-  res.send("MFS Backend Running");
+  res.send("✅ Backend Running");
 });
 
 /* ===== START SERVER ===== */
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on ${PORT}`);
 });
