@@ -15,7 +15,7 @@ let ACCESS_TOKEN = "";
 
 /* ===== LOGIN ===== */
 app.get("/login", (req, res) => {
-  const url = `https://api.fyers.in/api/v2/generate-authcode?client_id=${APP_ID}&redirect_uri=${REDIRECT_URI}&response_type=code&state=sample`;
+  const url = `https://api.fyers.in/api/v3/generate-authcode?client_id=${APP_ID}&redirect_uri=${REDIRECT_URI}&response_type=code&state=sample`;
   res.redirect(url);
 });
 
