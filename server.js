@@ -1,7 +1,8 @@
 import express from "express";
 import cors from "cors";
 import axios from "axios";
-import WebSocket from "ws";
+import http from "http";
+import WebSocket, { WebSocketServer } from "ws";
 
 const app = express();
 app.use(cors());
@@ -12,13 +13,13 @@ const REDIRECT_URI = process.env.REDIRECT_URI;
 
 let ACCESS_TOKEN = "";
 
-/* LOGIN */
+/* ===== LOGIN ===== */
 app.get("/login", (req, res) => {
   const url = `https://api.fyers.in/api/v2/generate-authcode?client_id=${APP_ID}&redirect_uri=${REDIRECT_URI}&response_type=code&state=sample`;
   res.redirect(url);
 });
 
-/* CALLBACK */
+/* ===== CALLBACK ===== */
 app.get("/callback", async (req, res) => {
   const auth_code = req.query.auth_code;
 
@@ -30,19 +31,29 @@ app.get("/callback", async (req, res) => {
     });
 
     ACCESS_TOKEN = `${APP_ID}:${response.data.access_token}`;
-    res.send("Login successful. You can close this tab.");
+    res.send("✅ Login successful. You can close this tab.");
   } catch (err) {
-    res.send("Error generating token");
+    console.error(err.response?.data || err.message);
+    res.send("❌ Error generating token");
   }
 });
 
-/* WEBSOCKET */
-const wss = new WebSocket.Server({ port: 8080 });
+/* ===== CREATE SERVER ===== */
+const server = http.createServer(app);
+
+/* ===== WEBSOCKET ===== */
+const wss = new WebSocketServer({ server });
 
 function connectFyers() {
-  const ws = new WebSocket("wss://socket.fyers.in/socket/v2/dataSock");
+  const ws = new WebSocket("wss://socket.fyers.in/socket/v2/dataSock", {
+    headers: {
+      Authorization: ACCESS_TOKEN
+    }
+  });
 
   ws.on("open", () => {
+    console.log("Connected to Fyers");
+
     ws.send(JSON.stringify({
       T: "SUB_L2",
       symbol: [
@@ -61,14 +72,32 @@ function connectFyers() {
     });
   });
 
-  ws.on("close", () => setTimeout(connectFyers, 3000));
+  ws.on("close", () => {
+    console.log("Reconnecting to Fyers...");
+    setTimeout(connectFyers, 3000);
+  });
+
+  ws.on("error", (err) => {
+    console.error("Fyers WS Error:", err.message);
+  });
 }
 
+/* ===== START STREAM ===== */
 app.get("/start", (req, res) => {
-  if (!ACCESS_TOKEN) return res.send("Login first");
+  if (!ACCESS_TOKEN) return res.send("❌ Login first");
 
   connectFyers();
-  res.send("Live streaming started");
+  res.send("🚀 Live streaming started");
 });
 
-app.listen(3000, () => console.log("Server running"));
+/* ===== HEALTH CHECK ===== */
+app.get("/", (req, res) => {
+  res.send("MFS Backend Running");
+});
+
+/* ===== START SERVER ===== */
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
