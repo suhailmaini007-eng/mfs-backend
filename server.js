@@ -23,24 +23,14 @@ app.get("/login", (req, res) => {
 app.get("/callback", async (req, res) => {
   const auth_code = req.query.auth_code;
 
-  try {
-    const response = await axios.post(
-      "https://api.fyers.in/api/v3/token",
-      {
-        client_id: APP_ID,
-        secret_key: SECRET_KEY,
-        grant_type: "authorization_code",
-        code: auth_code
-      }
-    );
-
-    ACCESS_TOKEN = `${APP_ID}:${response.data.access_token}`;
-
-    res.send("✅ Login successful. You can close this tab.");
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.send("❌ Token error: " + JSON.stringify(err.response?.data));
+  if (!auth_code) {
+    return res.send("❌ No auth code received");
   }
+
+  // IMPORTANT: This is the correct token format
+  ACCESS_TOKEN = `${APP_ID}:${auth_code}`;
+
+  res.send("✅ Login successful (token captured). Now open /start");
 });
 
 /* ===== CREATE SERVER ===== */
@@ -50,7 +40,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 function connectFyers() {
-  const ws = new WebSocket("wss://socket.fyers.in/socket/v3/dataSock", {
+  const ws = new WebSocket("wss://socket.fyers.in/socket/v2/dataSock", {
     headers: {
       Authorization: ACCESS_TOKEN
     }
