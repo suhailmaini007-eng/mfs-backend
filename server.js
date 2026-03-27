@@ -24,11 +24,11 @@ app.get("/callback", async (req, res) => {
   const auth_code = req.query.auth_code;
 
   try {
-    const response = await axios.post("https://api.fyers.in/api/v2/token", {
-      grant_type: "authorization_code",
-      appIdHash: Buffer.from(APP_ID + ":" + SECRET_KEY).toString("base64"),
-      code: auth_code
-    });
+    const response = await axios.post("https://api.fyers.in/api/v3/token", {
+  grant_type: "authorization_code",
+  appIdHash: Buffer.from(APP_ID + ":" + SECRET_KEY).toString("base64"),
+  code: auth_code
+});
 
     ACCESS_TOKEN = `${APP_ID}:${response.data.access_token}`;
     res.send("✅ Login successful. You can close this tab.");
