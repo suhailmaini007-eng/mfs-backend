@@ -86,41 +86,119 @@ function makeQuote(sym, ltp, prevClose, chg, pct, timestamp) {
 }
 
 // ─── SOURCE 1: Yahoo Finance ──────────────────────────────────────────────────
+// Yahoo blocks plain server requests — we use cookie+crumb handshake + fallback URLs
+
+let _yfCookie = '';
+let _yfCrumb  = '';
+let _yfCrumbFetchedAt = 0;
+
+async function getYahooCrumb() {
+  const age = Date.now() - _yfCrumbFetchedAt;
+  if (_yfCookie && _yfCrumb && age < 3600000) return { cookie: _yfCookie, crumb: _yfCrumb };
+
+  // Step 1: get a cookie from Yahoo Finance homepage
+  const cookieRes = await axios.get('https://finance.yahoo.com/', {
+    timeout: 8000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+    maxRedirects: 5,
+  });
+  const setCookie = cookieRes.headers['set-cookie'] || [];
+  _yfCookie = setCookie.map(c => c.split(';')[0]).join('; ');
+
+  // Step 2: exchange cookie for a crumb
+  const crumbRes = await axios.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    timeout: 8000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Cookie': _yfCookie,
+    },
+  });
+  _yfCrumb = typeof crumbRes.data === 'string' ? crumbRes.data.trim() : '';
+  _yfCrumbFetchedAt = Date.now();
+
+  return { cookie: _yfCookie, crumb: _yfCrumb };
+}
+
 async function fetchYahooFinance(symbols) {
   const fields = 'regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketPreviousClose,regularMarketTime,shortName';
-  const url = `https://query2.finance.yahoo.com/v8/finance/quote?symbols=${symbols.join(',')}&fields=${fields}&formatted=false&lang=en-US&region=IN`;
-  
-  const res = await axios.get(url, {
-    timeout: 10000,
-    headers: {
-      'User-Agent'      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept'          : 'application/json',
-      'Accept-Language' : 'en-US,en;q=0.9',
-      'Referer'         : 'https://finance.yahoo.com/',
+  const symStr = symbols.join(',');
+
+  // Try multiple Yahoo endpoint strategies
+  const strategies = [
+    // Strategy A: crumb-authenticated v8
+    async () => {
+      const { cookie, crumb } = await getYahooCrumb();
+      const url = `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${encodeURIComponent(symStr)}&fields=${fields}&formatted=false&crumb=${encodeURIComponent(crumb)}`;
+      const res = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'User-Agent'     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept'         : 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer'        : 'https://finance.yahoo.com/',
+          'Cookie'         : cookie,
+        },
+      });
+      return res.data?.quoteResponse?.result;
+    },
+    // Strategy B: query2 with no crumb (sometimes works)
+    async () => {
+      const url = `https://query2.finance.yahoo.com/v8/finance/quote?symbols=${encodeURIComponent(symStr)}&fields=${fields}&formatted=false&lang=en-US&region=US`;
+      const res = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'User-Agent'     : 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+          'Accept'         : '*/*',
+          'Referer'        : 'https://finance.yahoo.com/',
+        },
+      });
+      return res.data?.quoteResponse?.result;
+    },
+    // Strategy C: Yahoo Finance v7 (older, still sometimes works)
+    async () => {
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symStr)}&fields=${fields}`;
+      const res = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+          'Accept'    : 'application/json',
+          'Referer'   : 'https://finance.yahoo.com/',
+        },
+      });
+      return res.data?.quoteResponse?.result;
+    },
+  ];
+
+  let lastErr = null;
+  for (const strategy of strategies) {
+    try {
+      const results = await strategy();
+      if (!Array.isArray(results) || results.length === 0) continue;
+
+      const out = {};
+      results.forEach(q => {
+        if (!q.regularMarketPrice) return;
+        out[q.symbol] = {
+          ...makeQuote(
+            q.symbol,
+            q.regularMarketPrice,
+            q.regularMarketPreviousClose,
+            q.regularMarketChange,
+            q.regularMarketChangePercent,
+            q.regularMarketTime
+          ),
+          shortName: q.shortName || q.symbol,
+          source   : 'yahoo',
+        };
+      });
+      if (Object.keys(out).length > 0) return out;
+    } catch (e) {
+      lastErr = e;
+      _yfCrumb = ''; // reset crumb on failure so next call re-fetches
+      continue;
     }
-  });
-
-  const results = res.data?.quoteResponse?.result;
-  if (!Array.isArray(results) || results.length === 0)
-    throw new Error('Yahoo: empty result');
-
-  const out = {};
-  results.forEach(q => {
-    if (!q.regularMarketPrice) return;
-    out[q.symbol] = {
-      ...makeQuote(
-        q.symbol,
-        q.regularMarketPrice,
-        q.regularMarketPreviousClose,
-        q.regularMarketChange,
-        q.regularMarketChangePercent,
-        q.regularMarketTime
-      ),
-      shortName: q.shortName || q.symbol,
-      source   : 'yahoo',
-    };
-  });
-  return out;
+  }
+  throw new Error('Yahoo all strategies failed: ' + (lastErr?.message || 'unknown'));
 }
 
 // ─── SOURCE 2: Fyers API ──────────────────────────────────────────────────────
