@@ -1,1 +1,23 @@
+services:
+  - type: web
+    name: mfs-live-backend
+    env: node
+    plan: free           # free tier — spins down after 15 min inactivity, wakes in ~30s
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Fill these in Render dashboard → Environment tab (or sync from .env.example)
+      - key: FYERS_APP_ID
+        sync: false
+      - key: FYERS_SECRET
+        sync: false
+      - key: FYERS_TOKEN
+        sync: false
+      - key: KITE_API_KEY
+        sync: false
+      - key: KITE_ACCESS_TOKEN
+        sync: false
 
